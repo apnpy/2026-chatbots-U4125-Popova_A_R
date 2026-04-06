@@ -1,12 +1,21 @@
 University: [ITMO University](https://itmo.ru/ru/)
+
 Faculty: [FICT](https://fict.itmo.ru)
+
 Course: [Vibe Coding: AI-боты для бизнеса](https://github.com/itmo-ict-faculty/vibe-coding-for-business)
+
 Year: 2026
+
 Group: U4125
+
 Author: Popova Alina Romanovna
+
 Lab: Lab1
+
 Date of create: 03.04.2026
+
 Date of finished: 
+
 
 ## Отчет по лабораторной работе
 
@@ -61,5 +70,5 @@ Date of finished:
 <img width="427" height="534" alt="image" src="https://github.com/user-attachments/assets/ed814d57-fef4-4c71-b7a4-1d981a83978a" />
 <img width="423" height="566" alt="image" src="https://github.com/user-attachments/assets/17627e2c-0daa-45ff-9372-f5118b45104f" />
 
-11. Видео с работой бота: https://drive.google.com/file/d/1GmAxFI81oA8pY8Dtsy8Xefw9N89G90X5/view?usp=sharing
+11. Видео с работой бота: https://drive.google.com/file/d/1NSoUZHKbxyTqdpgyvquz2GqLGe49CkqS/view?usp=sharing 
 
