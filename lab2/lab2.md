@@ -14,7 +14,7 @@ Lab: Lab2
 
 Date of create: 06.04.2026
 
-Date of finished: 
+Date of finished: 06.04.2026
 
 
 ## Отчет по лабораторной работе
