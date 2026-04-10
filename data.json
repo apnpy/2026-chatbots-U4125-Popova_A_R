@@ -1,0 +1,94 @@
+{
+  "users": {
+    "714423203": {
+      "favorites": [
+        "omelet_veggies"
+      ],
+      "selected_recipe_ids": [
+        "greek_yogurt_bowl",
+        "pasta_tuna",
+        "chicken_stroganoff_simple",
+        "stuffed_bell_pepper",
+        "buckwheat_turkey",
+        "omelet_veggies",
+        "cottage_cheese_cakes",
+        "creamy_tomato_soup",
+        "banana_oat_pancakes",
+        "smoothie_bowl_simple",
+        "rice_milk_porridge",
+        "pea_soup_puree",
+        "stuffed_mushrooms_oven",
+        "chicken_wrap",
+        "milk_oatmeal_honey",
+        "chicken_potato_pan",
+        "chicken_soup_noodle"
+      ],
+      "preferences": {
+        "exclude_ingredients": []
+      },
+      "shopping_recipe_ids": [
+        "chicken_wrap"
+      ]
+    },
+    "730350584": {
+      "favorites": [],
+      "selected_recipe_ids": [
+        "banana_oat_pancakes",
+        "egg_salad_sandwich",
+        "baked_salmon_lemon"
+      ],
+      "preferences": {
+        "exclude_ingredients": []
+      }
+    },
+    "1053943832": {
+      "favorites": [],
+      "selected_recipe_ids": [
+        "omelet_veggies"
+      ],
+      "preferences": {
+        "exclude_ingredients": []
+      }
+    },
+    "1759880172": {
+      "favorites": [],
+      "selected_recipe_ids": [
+        "banana_oat_pancakes"
+      ],
+      "preferences": {
+        "exclude_ingredients": []
+      }
+    },
+    "841797579": {
+      "favorites": [],
+      "selected_recipe_ids": [
+        "baked_salmon_lemon",
+        "chicken_stroganoff_simple"
+      ],
+      "preferences": {
+        "exclude_ingredients": []
+      }
+    },
+    "539236016": {
+      "favorites": [
+        "greek_yogurt_bowl"
+      ],
+      "selected_recipe_ids": [
+        "greek_yogurt_bowl"
+      ],
+      "preferences": {
+        "exclude_ingredients": []
+      }
+    },
+    "563845055": {
+      "favorites": [],
+      "selected_recipe_ids": [
+        "apple_cinnamon_pancakes"
+      ],
+      "shopping_recipe_ids": [],
+      "preferences": {
+        "exclude_ingredients": []
+      }
+    }
+  }
+}
