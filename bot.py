@@ -6,6 +6,24 @@ from collections import Counter
 from pathlib import Path
 from random import sample
 from typing import Dict, List, Optional, Set
+from fastapi import FastAPI, Request
+from telegram import Update
+from telegram.ext import Application
+
+app = FastAPI()
+
+application = Application.builder().token("TOKEN").build()
+
+@app.on_event("startup")
+async def startup():
+    await application.initialize()
+
+@app.post("/webhook")
+async def webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, application.bot)
+    await application.process_update(update)
+    return {"ok": True}
 
 from dotenv import load_dotenv
 from telegram import (
