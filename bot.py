@@ -12,14 +12,24 @@ from telegram.ext import Application
 
 app = FastAPI()
 
-TOKEN = os.getenv("BOT_TOKEN")
-print("TOKEN:", TOKEN)  # временно для проверки
+from dotenv import load_dotenv
+load_dotenv()
 
-application = Application.builder().token(TOKEN).build()
+TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("BOT_TOKEN не найден")
+
+application = (
+    Application.builder()
+    .token(TOKEN)
+    .build()
+)
 
 @app.on_event("startup")
 async def startup():
     await application.initialize()
+    await post_init(application)
+    await application.start()
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -28,18 +38,7 @@ async def webhook(request: Request):
     await application.process_update(update)
     return {"ok": True}
 
-from telegram.ext import CommandHandler, MessageHandler, filters
 
-async def start(update, context):
-    await update.message.reply_text("Привет!")
-
-async def handle_message(update, context):
-    await update.message.reply_text("Я получил сообщение")
-
-application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(filters.TEXT, handle_message))
-
-from dotenv import load_dotenv
 from telegram import (
     BotCommand,
     InlineKeyboardButton,
@@ -49,7 +48,6 @@ from telegram import (
     Update,
 )
 from telegram.ext import (
-    Application,
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
@@ -57,7 +55,6 @@ from telegram.ext import (
     filters,
 )
 
-load_dotenv()
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -851,54 +848,37 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
             "Упс, что-то пошло не так. Попробуйте еще раз чуть позже 🙏"
         )
 
+application.post_init = post_init
 
-def main() -> None:
-    token = os.getenv("BOT_TOKEN")
-    if not token:
-        raise RuntimeError("Не найден BOT_TOKEN в .env")
-    if not RECIPES:
-        raise RuntimeError(
-            f"Не удалось загрузить рецепты из {RECIPES_FILE}. Проверьте файл и повторите запуск."
-        )
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("help", help_cmd))
+application.add_handler(CommandHandler("prefs", prefs_cmd))
 
-    app = Application.builder().token(token).post_init(post_init).build()
+application.add_handler(CommandHandler("breakfast", breakfast))
+application.add_handler(CommandHandler("lunch", lunch))
+application.add_handler(CommandHandler("dinner", dinner))
+application.add_handler(CommandHandler("quick", quick_recipe))
+application.add_handler(CommandHandler("today", menu_day))
+application.add_handler(CommandHandler("week", menu_week))
+application.add_handler(CommandHandler("fromfridge", from_what))
+application.add_handler(CommandHandler("mylist", list_selected))
+application.add_handler(CommandHandler("cart", shopping_list))
+application.add_handler(CommandHandler("favorites", show_favorites))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("prefs", prefs_cmd))
-    # Латинские алиасы (отображаются в системном меню команд Telegram)
-    app.add_handler(CommandHandler("breakfast", breakfast))
-    app.add_handler(CommandHandler("lunch", lunch))
-    app.add_handler(CommandHandler("dinner", dinner))
-    app.add_handler(CommandHandler("quick", quick_recipe))
-    app.add_handler(CommandHandler("today", menu_day))
-    app.add_handler(CommandHandler("week", menu_week))
-    app.add_handler(CommandHandler("fromfridge", from_what))
-    app.add_handler(CommandHandler("mylist", list_selected))
-    app.add_handler(CommandHandler("cart", shopping_list))
-    app.add_handler(CommandHandler("favorites", show_favorites))
+# русские команды
+application.add_handler(MessageHandler(filters.Regex(r"^/предпочтения(\s+.+)?$"), set_preferences))
+application.add_handler(MessageHandler(filters.Regex(r"^/рецептзавтрак$"), breakfast))
+application.add_handler(MessageHandler(filters.Regex(r"^/рецептобед$"), lunch))
+application.add_handler(MessageHandler(filters.Regex(r"^/рецептужин$"), dinner))
+application.add_handler(MessageHandler(filters.Regex(r"^/рецептбыстрый$"), quick_recipe))
+application.add_handler(MessageHandler(filters.Regex(r"^/менюдень$"), menu_day))
+application.add_handler(MessageHandler(filters.Regex(r"^/менюнеделя$"), menu_week))
+application.add_handler(MessageHandler(filters.Regex(r"^/список$"), list_selected))
+application.add_handler(MessageHandler(filters.Regex(r"^/изчего$"), from_what))
+application.add_handler(MessageHandler(filters.Regex(r"^/списокпокупок$"), shopping_list))
+application.add_handler(MessageHandler(filters.Regex(r"^/избранное$"), show_favorites))
 
-    app.add_handler(MessageHandler(filters.Regex(r"^/предпочтения(\s+.+)?$"), set_preferences))
-    app.add_handler(MessageHandler(filters.Regex(r"^/рецептзавтрак$"), breakfast))
-    app.add_handler(MessageHandler(filters.Regex(r"^/рецептобед$"), lunch))
-    app.add_handler(MessageHandler(filters.Regex(r"^/рецептужин$"), dinner))
-    app.add_handler(MessageHandler(filters.Regex(r"^/рецептбыстрый$"), quick_recipe))
-    app.add_handler(MessageHandler(filters.Regex(r"^/менюдень$"), menu_day))
-    app.add_handler(MessageHandler(filters.Regex(r"^/менюнеделя$"), menu_week))
-    app.add_handler(MessageHandler(filters.Regex(r"^/список$"), list_selected))
-    app.add_handler(MessageHandler(filters.Regex(r"^/изчего$"), from_what))
-    app.add_handler(MessageHandler(filters.Regex(r"^/списокпокупок$"), shopping_list))
-    app.add_handler(MessageHandler(filters.Regex(r"^/список_покупок$"), shopping_list))
-    app.add_handler(MessageHandler(filters.Regex(r"^список покупок$"), shopping_list))
-    app.add_handler(MessageHandler(filters.Regex(r"^/избранное$"), show_favorites))
+application.add_handler(CallbackQueryHandler(callback_router))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, free_text_router))
 
-    app.add_handler(CallbackQueryHandler(callback_router))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, free_text_router))
-    app.add_error_handler(error_handler)
-
-    logger.info("Бот запущен")
-    app.run_polling()
-
-
-if __name__ == "__main__":
-    main()
+application.add_error_handler(error_handler)
