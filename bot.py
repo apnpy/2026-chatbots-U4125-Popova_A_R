@@ -12,7 +12,10 @@ from telegram.ext import Application
 
 app = FastAPI()
 
-application = Application.builder().token("BOT_TOKEN").build()
+TOKEN = os.getenv("BOT_TOKEN")
+print("TOKEN:", TOKEN)  # временно для проверки
+
+application = Application.builder().token(TOKEN).build()
 
 @app.on_event("startup")
 async def startup():
