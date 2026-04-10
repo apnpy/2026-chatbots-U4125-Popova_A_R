@@ -60,7 +60,8 @@ Date of finished:
 
 ###Сбор обратной связи
 
-1. Отправила бот на тестирование друзьям. Обратная связь:
+1. Отправила бот на тестирование друзьям. (Суммарно воспользовалось около 7 человек, обратную связь получила от трех)
+Обратная связь:
 <img width="464" height="71" alt="image" src="https://github.com/user-attachments/assets/ded95dfd-b240-49a9-9a6e-12803987b7ec" />
 <img width="929" height="38" alt="image" src="https://github.com/user-attachments/assets/f278f040-9cc5-47dd-be6f-e363f7965d9b" />
 <img width="932" height="92" alt="image" src="https://github.com/user-attachments/assets/190cf64d-d278-41e8-b2fa-c2054e884aa3" />
