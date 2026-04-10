@@ -67,6 +67,19 @@ RECIPES_FILE = Path("recipes_110_final.json")
 PENDING_RECIPE_LIST_KEY = "pending_recipe_list"
 # Сколько вариантов показывать в одном списке (инлайн-кнопки не должны разрастаться слишком сильно).
 MAX_RECIPES_IN_LIST = 8
+LOW_KCAL_MAX = 420
+HIGH_PROTEIN_MIN = 25
+EXPENSIVE_KEYWORDS = {
+    "лосось",
+    "говядин",
+    "форель",
+    "кревет",
+    "авокадо",
+    "рикотта",
+    "моцарел",
+    "пармез",
+    "кокос",
+}
 
 
 def _extract_json_object(raw: str, opening_brace_idx: int) -> Optional[str]:
@@ -218,6 +231,10 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
             KeyboardButton("❤️ Избранное"),
             KeyboardButton("❓ Помощь"),
         ],
+        [
+            KeyboardButton("🧾 Фильтр"),
+            KeyboardButton("🔎 Поиск блюда"),
+        ],
     ],
     resize_keyboard=True,
     input_field_placeholder="Выберите действие кнопкой или откройте меню ⌘",
@@ -272,6 +289,10 @@ def main_menu_inline_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton("Помощь", callback_data="nav|help"),
             ],
+            [
+                InlineKeyboardButton("Фильтр", callback_data="nav|filter"),
+                InlineKeyboardButton("Поиск", callback_data="nav|search"),
+            ],
         ]
     )
 
@@ -283,11 +304,13 @@ HELP_TEXT = (
     "/рецептзавтрак · /рецептобед · /рецептужин · /рецептбыстрый\n"
     "/менюдень · /менюнеделя\n"
     "/изчего — что приготовить из того, что есть\n"
+    "/поискблюда — поиск по названию\n"
+    "/фильтрнизкокалорийное · /фильтрбелковое · /фильтрдешевое\n"
     "/список — выбранные блюда · /списокпокупок\n"
     "/избранное · /предпочтения рыба, молоко\n\n"
     "<b>По-английски (то же самое):</b>\n"
     "/breakfast /lunch /dinner /quick /today /week /fromfridge /mylist /cart /favorites\n"
-    "/prefs молоко, орехи"
+    "/prefs молоко, орехи · /search · /filterlowcal /filterprotein /filtercheap"
 )
 
 
@@ -308,6 +331,10 @@ async def post_init(application: Application) -> None:
             BotCommand("cart", "Список покупок"),
             BotCommand("favorites", "Избранное"),
             BotCommand("prefs", "Исключить продукты: /prefs молоко, рыба"),
+            BotCommand("search", "Поиск по названию блюда"),
+            BotCommand("filterlowcal", "Фильтр: низкокалорийное"),
+            BotCommand("filterprotein", "Фильтр: белковое"),
+            BotCommand("filtercheap", "Фильтр: дешевое"),
         ]
     )
 
@@ -317,6 +344,7 @@ def default_user_record() -> Dict:
         "favorites": [],
         "selected_recipe_ids": [],
         "shopping_recipe_ids": [],
+        "shopping_items": [],
         "preferences": {
             "exclude_ingredients": [],
         },
@@ -345,6 +373,7 @@ def get_user(storage: Dict, user_id: int) -> Dict:
     users.setdefault(key, default_user_record())
     user = users[key]
     user.setdefault("shopping_recipe_ids", [])
+    user.setdefault("shopping_items", [])
     return user
 
 
@@ -400,6 +429,125 @@ def count_ingredient_overlap(user_ingredients: Set[str], recipe_ingredient_lines
         if any(u in low for u in user_ingredients):
             hits += 1
     return hits
+
+
+def is_cheap_recipe(recipe: Dict) -> bool:
+    """Грубая оценка «дешевого» рецепта по составу ингредиентов."""
+    ingredients = [str(x).lower() for x in recipe.get("ingredients", [])]
+    expensive_hits = sum(
+        1 for line in ingredients if any(keyword in line for keyword in EXPENSIVE_KEYWORDS)
+    )
+    return expensive_hits <= 1 and len(ingredients) <= 8
+
+
+def recipe_matches_filter(recipe: Dict, filter_key: str) -> bool:
+    nutrition = recipe.get("nutrition", {})
+    kcal = nutrition.get("kcal")
+    protein = nutrition.get("protein")
+
+    if filter_key == "lowcal":
+        return isinstance(kcal, (int, float)) and kcal <= LOW_KCAL_MAX
+    if filter_key == "protein":
+        return isinstance(protein, (int, float)) and protein >= HIGH_PROTEIN_MIN
+    if filter_key == "cheap":
+        return is_cheap_recipe(recipe)
+    return False
+
+
+def filter_title(filter_key: str) -> str:
+    labels = {
+        "lowcal": "низкокалорийные",
+        "protein": "белковые",
+        "cheap": "дешевые",
+    }
+    return labels.get(filter_key, filter_key)
+
+
+def trim_label(text: str, max_len: int = 32) -> str:
+    """Ограничивает длину текста для компактных inline-кнопок."""
+    return text if len(text) <= max_len else text[: max_len - 1] + "…"
+
+
+def rebuild_shopping_items(user: Dict) -> List[Dict]:
+    """
+    Пересобирает список покупок из выбранных рецептов.
+    Сохраняет отметки «куплено» и пользовательские позиции.
+    """
+    grouped = Counter()
+    for rid in user.get("shopping_recipe_ids", []):
+        recipe = RECIPES.get(rid)
+        if not recipe:
+            continue
+        grouped.update(ing.lower() for ing in recipe.get("ingredients", []))
+
+    previous = user.get("shopping_items", [])
+    previous_state = {
+        str(item.get("name", "")).lower(): bool(item.get("bought", False))
+        for item in previous
+        if isinstance(item, dict) and item.get("name")
+    }
+    custom_items = [
+        item
+        for item in previous
+        if isinstance(item, dict) and bool(item.get("custom")) and item.get("name")
+    ]
+
+    items: List[Dict] = []
+    for name, count in sorted(grouped.items()):
+        items.append(
+            {
+                "name": name,
+                "count": int(count),
+                "bought": previous_state.get(name, False),
+                "custom": False,
+            }
+        )
+
+    for item in custom_items:
+        custom_name = str(item.get("name", "")).strip().lower()
+        if not custom_name:
+            continue
+        items.append(
+            {
+                "name": custom_name,
+                "count": int(item.get("count", 1) or 1),
+                "bought": bool(item.get("bought", False)),
+                "custom": True,
+            }
+        )
+
+    user["shopping_items"] = items
+    return items
+
+
+def shopping_keyboard(items: List[Dict]) -> InlineKeyboardMarkup:
+    buttons: List[List[InlineKeyboardButton]] = []
+    for idx, item in enumerate(items):
+        mark = "✅" if item.get("bought") else "⬜️"
+        caption = f"{mark} {trim_label(str(item.get('name', '')))}"
+        buttons.append([InlineKeyboardButton(caption, callback_data=f"shoptoggle|{idx}")])
+
+    buttons.append([InlineKeyboardButton("➕ Добавить свою позицию", callback_data="shopcustom|add")])
+    buttons.append([InlineKeyboardButton("🔄 Обновить список покупок", callback_data="shoprefresh")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def parse_custom_item(text: str) -> Optional[Dict]:
+    """
+    Разбирает пользовательскую позицию покупок.
+    Формат: 'молоко' или 'молоко x2'.
+    """
+    cleaned = text.strip().lower()
+    if not cleaned:
+        return None
+    match = re.match(r"^(.*?)(?:\s*x\s*(\d+))?$", cleaned)
+    if not match:
+        return None
+    name = (match.group(1) or "").strip()
+    if not name:
+        return None
+    count = int(match.group(2) or 1)
+    return {"name": name, "count": max(1, count), "bought": False, "custom": True}
 
 
 def build_recipe_keyboard(
@@ -463,6 +611,97 @@ async def set_preferences(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user["preferences"]["exclude_ingredients"] = items
     save_storage(storage)
     await update.message.reply_text("Сохранил предпочтения ✅")
+
+
+async def prompt_filter_menu(message) -> None:
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🥗 Низкокалорийное", callback_data="filter|lowcal")],
+            [InlineKeyboardButton("💪 Белковое", callback_data="filter|protein")],
+            [InlineKeyboardButton("💸 Дешевое", callback_data="filter|cheap")],
+        ]
+    )
+    await message.reply_text("Выберите фильтр:", reply_markup=keyboard)
+
+
+async def prompt_search_dish(message, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await message.reply_text("Введите название блюда для поиска.\nПример: омлет, паста, курица")
+    context.user_data["awaiting_dish_query"] = True
+
+
+async def show_filtered_recipe_list(
+    message, context: ContextTypes.DEFAULT_TYPE, filter_key: str, user_id: int
+) -> None:
+    storage = load_storage()
+    user = get_user(storage, user_id)
+    excluded = user["preferences"]["exclude_ingredients"]
+    filtered_ids = [
+        rid
+        for rid, recipe in RECIPES.items()
+        if recipe_allowed(recipe, excluded) and recipe_matches_filter(recipe, filter_key)
+    ]
+    if not filtered_ids:
+        await message.reply_text("По этому фильтру ничего не найдено. Попробуйте другой фильтр.")
+        return
+
+    shown = (
+        sample(filtered_ids, min(MAX_RECIPES_IN_LIST, len(filtered_ids)))
+        if len(filtered_ids) > MAX_RECIPES_IN_LIST
+        else filtered_ids
+    )
+    list_title = f"Подходящие {filter_title(filter_key)} блюда:"
+    set_pending_recipe_list(context, shown, list_title)
+    context.user_data["last_filter_key"] = filter_key
+    keyboard = build_recipe_keyboard(
+        shown, "recipe", refresh_callback=f"refresh|filter:{filter_key}"
+    )
+    await message.reply_text(list_title, reply_markup=keyboard)
+
+
+async def show_search_results(
+    message, context: ContextTypes.DEFAULT_TYPE, query_text: str, user_id: int
+) -> None:
+    needle = query_text.strip().lower()
+    if not needle:
+        await message.reply_text("Пустой запрос. Введите название блюда.")
+        return
+    storage = load_storage()
+    user = get_user(storage, user_id)
+    excluded = user["preferences"]["exclude_ingredients"]
+    matched = [
+        rid
+        for rid, recipe in RECIPES.items()
+        if needle in recipe.get("name", "").lower() and recipe_allowed(recipe, excluded)
+    ]
+    if not matched:
+        await message.reply_text("По названию ничего не найдено. Попробуйте другой запрос.")
+        return
+    shown = (
+        sample(matched, min(MAX_RECIPES_IN_LIST, len(matched)))
+        if len(matched) > MAX_RECIPES_IN_LIST
+        else matched
+    )
+    list_title = f"Результаты поиска по запросу «{query_text}»:"
+    set_pending_recipe_list(context, shown, list_title)
+    context.user_data["last_search_query"] = query_text
+    keyboard = build_recipe_keyboard(shown, "recipe", refresh_callback="refresh|search")
+    await message.reply_text(list_title, reply_markup=keyboard)
+
+
+async def search_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await prompt_search_dish(update.effective_message, context)
+
+
+async def filter_lowcal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await show_filtered_recipe_list(update.effective_message, context, "lowcal", update.effective_user.id)
+
+
+async def filter_protein(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await show_filtered_recipe_list(update.effective_message, context, "protein", update.effective_user.id)
+
+
+async def filter_cheap(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await show_filtered_recipe_list(update.effective_message, context, "cheap", update.effective_user.id)
 
 
 async def show_recipe_list(
@@ -542,6 +781,7 @@ async def send_menu_day(message, context: ContextTypes.DEFAULT_TYPE) -> None:
     for idx, variant in enumerate(variants, start=1):
         labels = ", ".join(RECIPES[rid]["name"] for rid in variant)
         buttons.append([InlineKeyboardButton(f"Вариант {idx}: {labels}", callback_data=f"daymenu|{idx - 1}")])
+    buttons.append([InlineKeyboardButton("🔄 Перегенерировать меню", callback_data="regenday")])
     await message.reply_text("Выберите вариант меню на день:", reply_markup=InlineKeyboardMarkup(buttons))
 
 
@@ -567,7 +807,12 @@ async def send_menu_week(message, context: ContextTypes.DEFAULT_TYPE) -> None:
     lines = []
     for day_idx, day_items in enumerate(week, start=1):
         lines.append(f"{day_idx} день: " + ", ".join(RECIPES[rid]["name"] for rid in day_items))
-    await message.reply_text("📅 Вариант меню на неделю:\n\n" + "\n".join(lines))
+    await message.reply_text(
+        "📅 Вариант меню на неделю:\n\n" + "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🔄 Перегенерировать меню", callback_data="regenweek")]]
+        ),
+    )
 
 
 async def menu_week(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -593,17 +838,21 @@ async def send_shopping_list(message, context: ContextTypes.DEFAULT_TYPE, user_i
     storage = load_storage()
     user = get_user(storage, user_id)
     selected = [rid for rid in user.get("shopping_recipe_ids", []) if rid in RECIPES]
-    if not selected:
+    if not selected and not user.get("shopping_items"):
         await message.reply_text(
             "Список покупок пуст. Откройте рецепт и нажмите «Добавить в покупки 🛒»."
         )
         return
-    all_ingredients = []
-    for rid in selected:
-        all_ingredients.extend([ing.lower() for ing in RECIPES[rid]["ingredients"]])
-    grouped = Counter(all_ingredients)
-    lines = [f"- {name} x{count}" for name, count in grouped.items()]
-    await message.reply_text("🛒 Список покупок:\n" + "\n".join(lines))
+    items = rebuild_shopping_items(user)
+    save_storage(storage)
+    if not items:
+        await message.reply_text("Список покупок пока пуст.")
+        return
+    lines = [
+        f"{'✅' if item.get('bought') else '⬜️'} {item['name']} x{item['count']}"
+        for item in items
+    ]
+    await message.reply_text("🛒 Список покупок:\n" + "\n".join(lines), reply_markup=shopping_keyboard(items))
 
 
 async def shopping_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -663,12 +912,32 @@ _MAIN_KB_ACTIONS = {
     "🛒 Покупки": ("shop", None),
     "❤️ Избранное": ("favs", None),
     "❓ Помощь": ("help", None),
+    "🧾 Фильтр": ("filter", None),
+    "🔎 Поиск блюда": ("search", None),
 }
 
 
 async def free_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Кнопки главной клавиатуры + ввод продуктов для «Из продуктов»."""
     text = (update.message.text or "").strip()
+    if context.user_data.get("awaiting_custom_shopping_item"):
+        context.user_data["awaiting_custom_shopping_item"] = False
+        parsed = parse_custom_item(text)
+        if not parsed:
+            await update.message.reply_text("Не понял формат. Пример: помидоры x2")
+            return
+        storage = load_storage()
+        user = get_user(storage, update.effective_user.id)
+        user.setdefault("shopping_items", []).append(parsed)
+        save_storage(storage)
+        await send_shopping_list(update.effective_message, context, update.effective_user.id)
+        return
+
+    if context.user_data.get("awaiting_dish_query"):
+        context.user_data["awaiting_dish_query"] = False
+        await show_search_results(update.message, context, text, update.effective_user.id)
+        return
+
     if context.user_data.get("awaiting_ingredients"):
         user_ingredients = {item.strip().lower() for item in text.split(",") if item.strip()}
         context.user_data["awaiting_ingredients"] = False
@@ -699,6 +968,10 @@ async def free_text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await send_favorites(update.effective_message, context, update.effective_user.id)
     elif kind == "help":
         await help_cmd(update, context)
+    elif kind == "filter":
+        await prompt_filter_menu(update.effective_message)
+    elif kind == "search":
+        await prompt_search_dish(update.effective_message, context)
 
 
 async def send_favorites(message, context: ContextTypes.DEFAULT_TYPE, user_id: int) -> None:
@@ -750,6 +1023,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await send_favorites(msg, context, cq_uid)
         elif action == "help":
             await msg.reply_html(HELP_TEXT, reply_markup=MAIN_KEYBOARD)
+        elif action == "filter":
+            await prompt_filter_menu(msg)
+        elif action == "search":
+            await prompt_search_dish(msg, context)
         return
 
     storage = load_storage()
@@ -815,6 +1092,18 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if refresh_mode in {"breakfast", "lunch", "dinner", "quick"}:
             await show_recipe_list(msg, context, refresh_mode, cq_uid)
             return
+        if refresh_mode.startswith("filter:"):
+            filter_key = refresh_mode.split(":", 1)[1]
+            if filter_key in {"lowcal", "protein", "cheap"} and cq_uid is not None:
+                await show_filtered_recipe_list(msg, context, filter_key, cq_uid)
+                return
+        if refresh_mode == "search":
+            query_text = context.user_data.get("last_search_query")
+            if not query_text or cq_uid is None:
+                await msg.reply_text("Введите поиск заново через кнопку «🔎 Поиск блюда».")
+                return
+            await show_search_results(msg, context, query_text, cq_uid)
+            return
         if refresh_mode == "from":
             items = context.user_data.get("last_from_ingredients", [])
             if not items:
@@ -822,6 +1111,63 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 return
             await show_from_ingredients_list(msg, context, set(items))
             return
+
+    if data.startswith("filter|") and msg:
+        await query.answer()
+        filter_key = data.split("|", 1)[1]
+        if filter_key in {"lowcal", "protein", "cheap"} and cq_uid is not None:
+            await show_filtered_recipe_list(msg, context, filter_key, cq_uid)
+        else:
+            await msg.reply_text("Неизвестный фильтр.")
+        return
+
+    if data == "regenday" and msg:
+        await query.answer()
+        await send_menu_day(msg, context)
+        return
+
+    if data == "regenweek" and msg:
+        await query.answer()
+        await send_menu_week(msg, context)
+        return
+
+    if data == "shoprefresh" and msg and cq_uid is not None:
+        await query.answer()
+        await send_shopping_list(msg, context, cq_uid)
+        return
+
+    if data == "shopcustom|add":
+        await query.answer()
+        context.user_data["awaiting_custom_shopping_item"] = True
+        await query.message.reply_text("Напишите новую позицию, например: яблоки x3")
+        return
+
+    if data.startswith("shoptoggle|") and msg and cq_uid is not None:
+        await query.answer()
+        idx_raw = data.split("|", 1)[1]
+        try:
+            idx = int(idx_raw)
+        except ValueError:
+            await msg.reply_text("Не удалось обработать выбранную позицию.")
+            return
+        storage = load_storage()
+        user = get_user(storage, cq_uid)
+        items = rebuild_shopping_items(user)
+        if idx < 0 or idx >= len(items):
+            await msg.reply_text("Элемент списка устарел. Обновите список покупок.")
+            return
+        items[idx]["bought"] = not bool(items[idx].get("bought"))
+        user["shopping_items"] = items
+        save_storage(storage)
+        lines = [
+            f"{'✅' if item.get('bought') else '⬜️'} {item['name']} x{item['count']}"
+            for item in items
+        ]
+        await query.edit_message_text(
+            "🛒 Список покупок:\n" + "\n".join(lines),
+            reply_markup=shopping_keyboard(items),
+        )
+        return
 
     if data.startswith("daymenu|"):
         await query.answer()
@@ -861,6 +1207,10 @@ application.add_handler(CommandHandler("quick", quick_recipe))
 application.add_handler(CommandHandler("today", menu_day))
 application.add_handler(CommandHandler("week", menu_week))
 application.add_handler(CommandHandler("fromfridge", from_what))
+application.add_handler(CommandHandler("search", search_cmd))
+application.add_handler(CommandHandler("filterlowcal", filter_lowcal))
+application.add_handler(CommandHandler("filterprotein", filter_protein))
+application.add_handler(CommandHandler("filtercheap", filter_cheap))
 application.add_handler(CommandHandler("mylist", list_selected))
 application.add_handler(CommandHandler("cart", shopping_list))
 application.add_handler(CommandHandler("favorites", show_favorites))
@@ -875,6 +1225,12 @@ application.add_handler(MessageHandler(filters.Regex(r"^/менюдень$"), me
 application.add_handler(MessageHandler(filters.Regex(r"^/менюнеделя$"), menu_week))
 application.add_handler(MessageHandler(filters.Regex(r"^/список$"), list_selected))
 application.add_handler(MessageHandler(filters.Regex(r"^/изчего$"), from_what))
+application.add_handler(MessageHandler(filters.Regex(r"^/поискблюда$"), search_cmd))
+application.add_handler(
+    MessageHandler(filters.Regex(r"^/фильтрнизкокалорийное$"), filter_lowcal)
+)
+application.add_handler(MessageHandler(filters.Regex(r"^/фильтрбелковое$"), filter_protein))
+application.add_handler(MessageHandler(filters.Regex(r"^/фильтрдешевое$"), filter_cheap))
 application.add_handler(MessageHandler(filters.Regex(r"^/списокпокупок$"), shopping_list))
 application.add_handler(MessageHandler(filters.Regex(r"^/избранное$"), show_favorites))
 
