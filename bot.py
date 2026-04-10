@@ -28,6 +28,17 @@ async def webhook(request: Request):
     await application.process_update(update)
     return {"ok": True}
 
+from telegram.ext import CommandHandler, MessageHandler, filters
+
+async def start(update, context):
+    await update.message.reply_text("Привет!")
+
+async def handle_message(update, context):
+    await update.message.reply_text("Я получил сообщение")
+
+application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT, handle_message))
+
 from dotenv import load_dotenv
 from telegram import (
     BotCommand,
